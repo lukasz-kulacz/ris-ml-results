@@ -1,0 +1,10 @@
+[project]
+name = "ris-ml-results"
+version = "0.1.0"
+description = "Analiza wyników pomiarów algorytmów sterowania RIS"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "marimo",
+    "pandas",
+    "plotly>=7.1.0",
+]

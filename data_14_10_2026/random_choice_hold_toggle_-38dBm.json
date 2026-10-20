@@ -1,0 +1,16 @@
+{
+  "algorithm": "random_choice_hold",
+  "generator_mode": "toggle",
+  "generator_toggle_period": 50,
+  "generator_power_dbm": -38.0,
+  "average_noise_power_db": -80.0,
+  "measurement_points": 6,
+  "warmup_iterations": 250,
+  "measurement_iterations": 1000,
+  "frequency_hz": 5500000000.0,
+  "rx_count": 1,
+  "ris_count": 2,
+  "system_controller_ip_address": "150.254.16.245",
+  "test_mode": false,
+  "saved_at": "2026-10-14T16:42:48.461711"
+}
