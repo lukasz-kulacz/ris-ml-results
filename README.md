@@ -1,9 +1,10 @@
 # ContRIS ML results
 
-- git wrzuic 
-- opisac jak to uruchomic 
-
-
+- Pobranie i instalacja **UV** https://docs.astral.sh/uv/getting-started/installation/
+- Uruchomienie
+```bash
+uv run marimo edit main.py
+```
 
 ## Teraz
 - 5 pomiarow pominac (pierwszych)
