@@ -1,0 +1,16 @@
+{
+  "algorithm": "mab",
+  "generator_mode": "continuous",
+  "generator_toggle_period": null,
+  "generator_power_dbm": -38.0,
+  "average_noise_power_db": -75.0,
+  "measurement_points": 6,
+  "warmup_sleep_s": 30.0,
+  "measurement_iterations": 1000,
+  "frequency_hz": 5500000000.0,
+  "rx_count": 1,
+  "ris_count": 2,
+  "system_controller_ip_address": "150.254.16.245",
+  "test_mode": false,
+  "saved_at": "2026-10-26T19:20:32.549633"
+}
