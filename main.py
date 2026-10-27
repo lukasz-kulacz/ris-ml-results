@@ -17,20 +17,35 @@ def _():
 
 @app.cell
 def _(Path, pd):
-    DATA_DIR = Path(__file__).parent / "data_14_10_2026"
+    DATA_DIR = Path(__file__).parent / "data_26_10_2026"
+
+    def read_measurement(path):
+        # Próbki z fazy settling są pomijane już przy wczytywaniu
+        df = pd.read_csv(path, parse_dates=["Timestamp"])
+        return df[~df["Settling"]].drop(columns="Settling")
+
+    # Pomiar szumu (generator wyłączony) — osobny plik noise_*
+    noise = pd.concat(
+        [read_measurement(path) for path in sorted(DATA_DIR.glob("noise_*.csv"))],
+        ignore_index=True,
+    )
 
     frames = []
     for path in sorted(DATA_DIR.glob("*.csv")):
+        if path.stem.startswith("noise_"):
+            continue
         # np. "random_choice_hold_toggle_-38dBm" -> algorytm, tryb, moc
         algorithm, mode, power = path.stem.rsplit("_", 2)
-        df = pd.read_csv(path, parse_dates=["Timestamp"])
+        df = read_measurement(path)
         df["algorithm"] = algorithm
         df["mode"] = mode.replace("continous", "continuous")  # literówka w pliku best_search
         df["power_dbm"] = int(power.removesuffix("dBm"))
+        if algorithm != 'noise':
+            df["Result"] = df["Result"] - 0.0
         frames.append(df)
 
     data = pd.concat(frames, ignore_index=True)
-    return (data,)
+    return data, noise
 
 
 @app.cell
@@ -52,23 +67,22 @@ def _(data):
 
     # Stała kolejność i kolory algorytmów — ten sam algorytm ma ten sam kolor na obu wykresach
     ALGORITHM_COLORS = {
+        "none": "#000000",
         "best_search": "#2a78d6",
         "mab": "#eb6834",
         "random_choice": "#1baf7a",
         "random_choice_hold": "#eda100",
     }
-    WARMUP_COLOR = "#b4b2a9"
 
     # Oś czasu: kolejny numer próbki w obrębie pliku (Iteration zeruje się w każdym punkcie)
     samples = data.sort_values(["algorithm", "mode", "Point", "Iteration"]).copy()
     samples["sample"] = samples.groupby(["algorithm", "mode"]).cumcount() + 1
 
     def median_filtered(df, window):
-        # Mediana krocząca (wyśrodkowana) liczona osobno dla każdego algorytmu, punktu
-        # i fazy (warmup / pomiar), żeby warmup nie wpływał na przefiltrowane pomiary
+        # Mediana krocząca (wyśrodkowana) liczona osobno dla każdego algorytmu i punktu
         if window <= 1:
             return df["Result"]
-        return df.groupby(["algorithm", "Point", "Warmup"])["Result"].transform(
+        return df.groupby(["algorithm", "Point"])["Result"].transform(
             lambda r: r.rolling(window, center=True, min_periods=1).median()
         )
 
@@ -77,14 +91,8 @@ def _(data):
         df["filtered"] = median_filtered(df, window)
         fig = go.Figure()
 
-        # Zakresy warmup i granice punktów pomiarowych (struktura identyczna dla wszystkich algorytmów)
+        # Granice punktów pomiarowych (struktura identyczna dla wszystkich algorytmów)
         points = df.groupby("Point")["sample"].agg(["min", "max"])
-        warmups = df[df["Warmup"]].groupby("Point")["sample"].agg(["min", "max"])
-        for _point, w in warmups.iterrows():
-            fig.add_vrect(
-                x0=w["min"] - 0.5, x1=w["max"] + 0.5,
-                fillcolor=WARMUP_COLOR, opacity=0.18, line_width=0, layer="below",
-            )
         for point, p in points.iterrows():
             if p["min"] > 1:
                 fig.add_vline(x=p["min"] - 0.5, line_width=1, line_dash="dot", line_color="#8a8880")
@@ -97,26 +105,13 @@ def _(data):
             a = df[df["algorithm"] == algorithm]
             if a.empty:
                 continue
-            # Pomiary (warmup = NaN, więc linia przerywa się na warmupie)
             fig.add_trace(go.Scattergl(
-                x=a["sample"], y=a["filtered"].where(~a["Warmup"]),
+                x=a["sample"], y=a["filtered"],
                 mode="lines", name=algorithm, legendgroup=algorithm,
                 line=dict(color=color, width=1.5),
                 customdata=a[["Point", "Iteration"]],
                 hovertemplate="%{y:.2f} dBm<br>punkt %{customdata[0]}, iteracja %{customdata[1]}",
             ))
-            # Warmup — wyszarzony, pomijany w analizie
-            fig.add_trace(go.Scattergl(
-                x=a["sample"], y=a["filtered"].where(a["Warmup"]),
-                mode="lines", name=f"{algorithm} (warmup)", legendgroup=algorithm,
-                showlegend=False, line=dict(color=WARMUP_COLOR, width=1), opacity=0.7,
-                hovertemplate="%{y:.2f} dBm (warmup)",
-            ))
-
-        # Skala Y tylko z pomiarów (bez warmup); szare fragmenty mogą wychodzić poza wykres
-        measured = df.loc[~df["Warmup"], "filtered"]
-        pad = 0.05 * (measured.max() - measured.min())
-        fig.update_yaxes(range=[measured.min() - pad, measured.max() + pad])
 
         filter_label = f", mediana z {window} próbek" if window > 1 else ""
         fig.update_layout(
@@ -145,8 +140,8 @@ def _(mo):
 
 
 @app.cell
-def _(median_window, power_over_time):
-    power_over_time("toggle", median_window.value)
+def _():
+    # power_over_time("toggle", median_window.value)
     return
 
 
@@ -161,10 +156,10 @@ def _(ALGORITHM_COLORS, go, np, samples):
     from plotly.subplots import make_subplots
 
     def power_cdf(mode):
-        # Tylko próbki pomiarowe (bez warmup) z włączonym generatorem, surowe — bez filtru medianowego.
+        # Tylko próbki z włączonym generatorem, surowe — bez filtru medianowego.
         # W trybie toggle odrzuca to połowę próbek (sam szum); w continuous generator jest zawsze włączony
         df = samples[
-            (samples["mode"] == mode) & ~samples["Warmup"] & samples["GeneratorEnabled"]
+            (samples["mode"] == mode) & samples["GeneratorEnabled"]
         ]
         point_ids = sorted(df["Point"].unique())
 
@@ -205,7 +200,7 @@ def _(ALGORITHM_COLORS, go, np, samples):
             fig.update_yaxes(title_text="CDF", row=r, col=1)
         fig.update_xaxes(title_text="Moc [dBm]", row=1 + point_rows)
         fig.update_layout(
-            title=f"CDF mocy odebranej (bez warmup, generator włączony) — tryb {mode}",
+            title=f"CDF mocy odebranej (generator włączony) — tryb {mode}",
             template="plotly_white",
             height=320 + 280 * point_rows,
             legend=dict(orientation="h", y=1.06, x=1, xanchor="right"),
@@ -216,8 +211,8 @@ def _(ALGORITHM_COLORS, go, np, samples):
 
 
 @app.cell
-def _(power_cdf):
-    power_cdf("toggle")
+def _():
+    # power_cdf("toggle")
     return
 
 
@@ -228,18 +223,16 @@ def _(power_cdf):
 
 
 @app.cell
-def _(mo, np, samples):
-    # Moc szumu: tryb toggle, generator wyłączony, bez warmup — wszystkie algorytmy i punkty.
+def _(mo, noise, np):
+    # Moc szumu wyłącznie z pliku noise_* (generator wyłączony).
     # Uśrednianie w skali liniowej (mW), wynik z powrotem w dBm
-    noise_samples = samples[
-        (samples["mode"] == "toggle") & ~samples["Warmup"] & ~samples["GeneratorEnabled"]
-    ]["Result"]
+    noise_samples = noise["Result"]
     noise_power_dbm = 10 * np.log10(np.mean(10 ** (noise_samples / 10)))
 
     mo.md(
         f"""
         **Średnia moc szumu:** {noise_power_dbm:.3f} dBm
-        (z {len(noise_samples)} próbek toggle z wyłączonym generatorem, bez warmup;
+        (z {len(noise_samples)} próbek z pomiaru szumu;
         odchylenie std. {noise_samples.std():.3f} dB)
         """
     )
@@ -271,11 +264,10 @@ def _(detection_margin, noise_power_dbm, pd, samples):
             "próbki z sygnałem": int(on.sum()),
         })
 
-    measured = samples[~samples["Warmup"]]
     detection = pd.concat([
-        measured.groupby(["mode", "algorithm"]).apply(detection_rates, include_groups=False)
+        samples.groupby(["mode", "algorithm"]).apply(detection_rates, include_groups=False)
             .assign(point="Wszystkie"),
-        measured.groupby(["mode", "algorithm", "Point"]).apply(detection_rates, include_groups=False)
+        samples.groupby(["mode", "algorithm", "Point"]).apply(detection_rates, include_groups=False)
             .reset_index("Point").assign(point=lambda d: "Punkt " + d["Point"].astype(str))
             .drop(columns="Point"),
     ]).reset_index()
@@ -322,8 +314,8 @@ def _(ALGORITHM_COLORS, detection, detection_threshold_dbm, go, make_subplots):
 
 
 @app.cell
-def _(detection_chart):
-    detection_chart("toggle")
+def _():
+    # detection_chart("toggle")
     return
 
 
